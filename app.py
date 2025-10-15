@@ -1,183 +1,150 @@
 import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import cv2
 import numpy as np
-import base64
-import time
+from gtts import gTTS
 import tempfile
 import os
-import threading
-from gtts import gTTS
-import streamlit.components.v1 as components
+import time
 
-# ---------- Page config ----------
-st.set_page_config(page_title="Gesture Voice Recognition (Live JS Camera)", layout="centered")
-st.title("🖐️ Gesture Voice Recognition — Live Camera (Mirror, Stable Version)")
-
+# ---------- Konfigurasi Halaman ----------
+st.set_page_config(page_title="Gesture Voice Recognition 🤖", layout="centered")
+st.title("🖐️ Gesture Voice Recognition Tanpa Mediapipe (Stable Cloud Version)")
 st.markdown("""
-🎥 Kamera langsung di halaman (tanpa WebRTC).  
-Frame dikirim ke Python setiap 1.8 detik untuk deteksi gesture dan TTS.  
-Gunakan Chrome / Edge untuk hasil terbaik.  
+Masukkan 4 kalimat yang akan diucapkan sesuai simbol jari berikut:
+1. ✋ = Semua jari terbuka  
+2. 👍 = Hanya jempol terbuka  
+3. ✌️ = Telunjuk & tengah terbuka  
+4. 🤘 = Metal (jempol, telunjuk, dan kelingking terbuka)
 """)
 
-# ---------- User inputs ----------
+# ---------- Input Kalimat ----------
 col1, col2 = st.columns(2)
 with col1:
-    kata1 = st.text_input("✋ Semua jari terbuka", "Halo semuanya!")
-    kata2 = st.text_input("👍 Hanya jempol", "Saya senang hari ini!")
+    kata1 = st.text_input("✋ (Semua jari terbuka)", "Halo semuanya!")
+    kata2 = st.text_input("👍 (Hanya jempol)", "Saya senang hari ini!")
 with col2:
-    kata3 = st.text_input("✌️ Telunjuk & tengah", "Nama saya Enrico!")
-    kata4 = st.text_input("🤘 Metal", "Sampai jumpa lagi!")
+    kata3 = st.text_input("✌️ (Telunjuk & Tengah)", "Nama saya Enrico!")
+    kata4 = st.text_input("🤘 (Metal)", "Sampai jumpa lagi!")
 
-GESTURES = {"✋": kata1, "👍": kata2, "✌️": kata3, "🤘": kata4}
+GESTURES = {
+    "✋": kata1,
+    "👍": kata2,
+    "✌️": kata3,
+    "🤘": kata4,
+}
 
-# ---------- TTS helper ----------
-def speak_async(text):
-    def _run():
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-                gTTS(text=text, lang="id").save(fp.name)
-                st.audio(fp.name, format="audio/mp3", autoplay=True)
-                time.sleep(1.5)
-                os.remove(fp.name)
-        except Exception:
-            pass
-    threading.Thread(target=_run, daemon=True).start()
+# ---------- Fungsi TTS ----------
+def generate_tts_file(text):
+    """Membuat file mp3 dari teks dan mengembalikan path-nya."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+        tts = gTTS(text=text, lang="id")
+        tts.save(fp.name)
+        return fp.name
 
-# ---------- Gesture detection ----------
-def detect_gesture_from_bgr(img_bgr):
-    try:
-        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (25, 25), 0)
-        _, thresh = cv2.threshold(blur, 70, 255,
-                                  cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_TREE,
-                                       cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return ""
+
+# ---------- Fungsi Deteksi Gesture Manual ----------
+def detect_gesture(img):
+    """
+    Deteksi sederhana gesture tangan berbasis area kulit.
+    Bukan machine learning, hanya contour & threshold sederhana agar ringan di Cloud.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (35, 35), 0)
+    _, thresh = cv2.threshold(blur, 70, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    gesture = ""
+
+    if len(contours) > 0:
         contour = max(contours, key=cv2.contourArea)
-        area_contour = cv2.contourArea(contour)
-        if area_contour < 2000:
-            return ""
         hull = cv2.convexHull(contour)
+        area_contour = cv2.contourArea(contour)
         area_hull = cv2.contourArea(hull)
         area_ratio = ((area_hull - area_contour) / area_contour) * 100 if area_contour > 0 else 0
 
-        if area_ratio < 12:
-            return "✋"
-        elif 12 <= area_ratio < 28:
-            return "👍"
-        elif 28 <= area_ratio < 48:
-            return "✌️"
+        # Heuristik sederhana
+        if area_ratio < 5:
+            gesture = "✋"
+        elif area_ratio < 15:
+            gesture = "👍"
+        elif area_ratio < 25:
+            gesture = "✌️"
         else:
-            return "🤘"
-    except Exception:
-        return ""
+            gesture = "🤘"
 
-# ---------- Camera component ----------
-interval_ms = 1800
-html_code = f"""
-<div style="display:flex;flex-direction:column;align-items:center;">
-  <video id="video" autoplay playsinline style="transform: scaleX(-1); width:640px; height:auto; border:1px solid #ddd;"></video>
-  <div style="margin-top:8px;">
-    <button id="startBtn">Start Camera</button>
-    <button id="stopBtn">Stop Camera</button>
-  </div>
-  <div id="status" style="margin-top:6px;color:#666">Status: camera stopped</div>
-</div>
+    return gesture, thresh
 
-<script>
-const video = document.getElementById('video');
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const status = document.getElementById('status');
-let stream = null;
-let captureInterval = null;
 
-async function startCamera() {{
-  try {{
-    stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: "user" }}, audio: false }});
-    video.srcObject = stream;
-    status.innerText = "Status: camera running";
-    captureInterval = setInterval(captureFrame, {interval_ms});
-  }} catch (err) {{
-    status.innerText = "Status: error: " + err.message;
-  }}
-}}
+# ---------- Video Transformer ----------
+class HandGestureTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.last_gesture = ""
+        self.last_time = time.time()
 
-function stopCamera() {{
-  if (captureInterval) {{
-    clearInterval(captureInterval);
-    captureInterval = null;
-  }}
-  if (stream) {{
-    stream.getTracks().forEach(t => t.stop());
-    stream = null;
-  }}
-  video.srcObject = null;
-  status.innerText = "Status: camera stopped";
-  if (window.Streamlit && window.Streamlit.setComponentValue) {{
-    window.Streamlit.setComponentValue(null);
-  }}
-}}
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        img = cv2.flip(img, 1)
 
-function captureFrame() {{
-  if (!stream) return;
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
-  const ctx = canvas.getContext('2d');
-  ctx.translate(canvas.width, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-  if (window.Streamlit && window.Streamlit.setComponentValue) {{
-    window.Streamlit.setComponentValue(dataUrl);
-  }}
-}}
+        gesture, mask = detect_gesture(img)
 
-startBtn.addEventListener('click', startCamera);
-stopBtn.addEventListener('click', stopCamera);
-</script>
-"""
-
-component = components.html(html_code, height=560)
-
-# ---------- Safely handle returned value ----------
-component_value = None
-try:
-    # Streamlit sometimes returns dict/None/DeltaGenerator, so we force convert to str safely
-    if isinstance(component, str):
-        component_value = component
-    elif hasattr(component, "_value"):
-        component_value = str(component._value)
-except Exception:
-    component_value = None
-
-# ---------- Process frame ----------
-if isinstance(component_value, str) and component_value.startswith("data:image"):
-    try:
-        header, b64data = component_value.split(",", 1)
-        img_bytes = base64.b64decode(b64data)
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        gesture = detect_gesture_from_bgr(img)
-        st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
-                 caption=f"Gesture: {gesture or 'Tidak dikenali'}",
-                 use_column_width=True)
-
-        if "last_gesture" not in st.session_state:
-            st.session_state.last_gesture = ""
-            st.session_state.last_time = 0
-
+        # Delay 2 detik antar gesture untuk mencegah spam suara
         current_time = time.time()
-        if gesture and gesture != st.session_state.last_gesture and (current_time - st.session_state.last_time) > 2:
-            st.session_state.last_gesture = gesture
-            st.session_state.last_time = current_time
-            text = GESTURES.get(gesture, "")
-            if text:
-                st.success(f"🔊 Mengucapkan: {text}")
-                speak_async(text)
-    except Exception as e:
-        st.error(f"Gagal memproses frame: {e}")
+        if gesture and gesture != self.last_gesture and (current_time - self.last_time) > 2:
+            self.last_gesture = gesture
+            self.last_time = current_time
+            st.session_state["tts_text"] = GESTURES.get(gesture, "")
+
+        cv2.putText(img, f"Gesture: {gesture}", (10, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        return img
+
+
+# ---------- Tombol Start / Stop Kamera ----------
+if "webrtc_running" not in st.session_state:
+    st.session_state["webrtc_running"] = False
+
+col_a, col_b = st.columns([1, 1])
+with col_a:
+    if st.button("▶️ Start Kamera"):
+        st.session_state["webrtc_running"] = True
+with col_b:
+    if st.button("⏹️ Stop Kamera"):
+        st.session_state["webrtc_running"] = False
+
+webrtc_ctx = None
+if st.session_state["webrtc_running"]:
+    webrtc_ctx = webrtc_streamer(
+        key="gesture-voice",
+        video_processor_factory=HandGestureTransformer,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,
+        rtc_configuration={  # FIX WebRTC Error di Streamlit Cloud
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]},
+                {
+                    "urls": ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"],
+                    "username": "openrelayproject",
+                    "credential": "openrelayproject",
+                },
+            ]
+        },
+    )
 else:
-    st.info("Belum menerima frame dari kamera. Tekan 'Start Camera' dan izinkan akses kamera.")
+    st.info("Kamera berhenti. Klik 'Start Kamera' untuk memulai.")
+
+# ---------- Pemutaran TTS ----------
+if "tts_text" in st.session_state and st.session_state["tts_text"]:
+    text = st.session_state.pop("tts_text")
+    try:
+        mp3_path = generate_tts_file(text)
+        st.audio(mp3_path, format="audio/mp3", autoplay=True)
+        st.info(f"🔊 Mengucapkan: \"{text}\"")
+    except Exception as e:
+        st.error(f"Gagal memutar TTS: {e}")
+    finally:
+        if "mp3_path" in locals() and os.path.exists(mp3_path):
+            os.remove(mp3_path)
+
+st.success("✅ Izinkan akses kamera di browser untuk memulai gesture recognition.")
