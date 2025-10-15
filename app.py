@@ -9,13 +9,13 @@ import time
 
 # ---------- Konfigurasi Halaman ----------
 st.set_page_config(page_title="Gesture Voice Recognition 🤖", layout="centered")
-st.title("🖐️ Gesture Voice Recognition Tanpa Mediapipe (Stable Cloud Version)")
+st.title("🖐️ Gesture Voice Recognition (STUN Version - No Mediapipe)")
 st.markdown("""
 Masukkan 4 kalimat yang akan diucapkan sesuai simbol jari berikut:
 1. ✋ = Semua jari terbuka  
 2. 👍 = Hanya jempol terbuka  
 3. ✌️ = Telunjuk & tengah terbuka  
-4. 🤘 = Metal (jempol, telunjuk, dan kelingking terbuka)
+4. 🤘 = Metal (jempol, telunjuk, dan kelingking)
 """)
 
 # ---------- Input Kalimat ----------
@@ -86,9 +86,8 @@ class HandGestureTransformer(VideoTransformerBase):
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1)
 
-        gesture, mask = detect_gesture(img)
+        gesture, _ = detect_gesture(img)
 
-        # Delay 2 detik antar gesture untuk mencegah spam suara
         current_time = time.time()
         if gesture and gesture != self.last_gesture and (current_time - self.last_time) > 2:
             self.last_gesture = gesture
@@ -120,14 +119,10 @@ if st.session_state["webrtc_running"]:
         video_processor_factory=HandGestureTransformer,
         media_stream_constraints={"video": True, "audio": False},
         async_processing=True,
-        rtc_configuration={  # FIX WebRTC Error di Streamlit Cloud
+        rtc_configuration={
+            # ✅ Gunakan hanya STUN Google agar stabil di Streamlit Cloud
             "iceServers": [
-                {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]},
-                {
-                    "urls": ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"],
-                    "username": "openrelayproject",
-                    "credential": "openrelayproject",
-                },
+                {"urls": ["stun:stun.l.google.com:19302"]}
             ]
         },
     )
