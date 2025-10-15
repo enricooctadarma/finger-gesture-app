@@ -4,3 +4,4 @@ cvzone
 mediapipe
 gtts
 numpy
+
