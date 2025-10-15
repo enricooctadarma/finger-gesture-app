@@ -9,14 +9,14 @@ from gtts import gTTS
 
 # ---------- CONFIG ----------
 st.set_page_config(page_title="Gesture Voice Recognition", layout="centered")
-st.title("🖐️ Gesture Voice Recognition - Final Stable Version")
+st.title("🪞 Gesture Voice Recognition - Mirror Camera Version")
 st.markdown("""
-📸 Ambil foto gesture tanganmu dan biarkan AI mengenali bentuknya!  
-🎙️ Aplikasi ini akan mengucapkan teks sesuai gesture yang terdeteksi.  
-💡 Kamera otomatis **dibalik (mirror)** agar arah tanganmu sesuai tampilan.
+📸 Ambil foto gesture tanganmu dan biarkan AI mengenalinya!  
+🎙️ Kamera & hasil foto akan tampil **mirror (dibalik seperti cermin)**.  
+💡 Arah tangan kiri dan kanan akan sesuai dengan arah di layar.
 """)
 
-# ---------- USER INPUT ----------
+# ---------- INPUT TEKS ----------
 col1, col2 = st.columns(2)
 with col1:
     kata1 = st.text_input("✋ Semua jari terbuka", "Halo semuanya!")
@@ -32,7 +32,7 @@ GESTURES = {
     "🤘": kata4,
 }
 
-# ---------- FUNGSI TEXT-TO-SPEECH ----------
+# ---------- FUNGSI SUARA ----------
 def speak_async(text):
     def _run():
         try:
@@ -49,18 +49,15 @@ def speak_async(text):
 def detect_gesture(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (25, 25), 0)
-    _, thresh = cv2.threshold(blur, 70, 255,
-                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_TREE,
-                                   cv2.CHAIN_APPROX_SIMPLE)
+    _, thresh = cv2.threshold(blur, 70, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     gesture = ""
     if contours:
         contour = max(contours, key=cv2.contourArea)
         hull = cv2.convexHull(contour)
         area_contour = cv2.contourArea(contour)
         area_hull = cv2.contourArea(hull)
-        area_ratio = ((area_hull - area_contour) / area_contour) * 100 \
-            if area_contour > 0 else 0
+        area_ratio = ((area_hull - area_contour) / area_contour) * 100 if area_contour > 0 else 0
 
         # Heuristik sederhana
         if area_ratio < 10:
@@ -76,20 +73,22 @@ def detect_gesture(img):
 # ---------- KAMERA ----------
 st.subheader("🎥 Ambil Foto Gesture")
 st.caption("Pastikan pencahayaan cukup dan tangan terlihat jelas.")
-img_file = st.camera_input("Ambil foto gesture")
+
+# Ambil foto dari kamera
+img_file = st.camera_input("📸 Ambil foto gesture (mirror mode aktif)")
 
 if img_file is not None:
-    # Baca & mirror gambar
+    # Baca gambar dan buat mirror
     bytes_data = img_file.getvalue()
     np_img = np.frombuffer(bytes_data, np.uint8)
     img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-    img = cv2.flip(img, 1)  # 🔁 Mirror
+    mirror_img = cv2.flip(img, 1)  # 🔁 mirror hasil foto
 
-    # Tampilkan preview
-    st.image(img, caption="Foto kamu (mirror mode)", channels="BGR")
+    # Tampilkan hasil mirror
+    st.image(mirror_img, caption="📸 Foto Mirror (dibalik seperti cermin)", channels="BGR")
 
-    # Deteksi gesture
-    gesture = detect_gesture(img)
+    # Deteksi gesture dari hasil mirror
+    gesture = detect_gesture(mirror_img)
     text_to_speak = GESTURES.get(gesture, "")
 
     if gesture:
@@ -100,4 +99,4 @@ if img_file is not None:
     else:
         st.warning("Gesture tidak dikenali. Coba foto ulang tanganmu dengan posisi lebih jelas.")
 else:
-    st.info("📷 Klik tombol di atas untuk mengambil foto gesture tanganmu.")
+    st.info("Klik tombol di atas untuk mengambil foto gesture tanganmu.")
