@@ -10,7 +10,7 @@ import threading
 
 # === Fungsi bicara (text-to-speech) ===
 def speak(text):
-    """Mengubah teks menjadi suara dan memutarnya di Streamlit."""
+    """Mengubah teks menjadi suara dan memutarnya di Streamlit dengan thread background."""
     def run_speech():
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
@@ -22,7 +22,6 @@ def speak(text):
         except Exception as e:
             st.error(f"Error suara: {e}")
     threading.Thread(target=run_speech, daemon=True).start()
-
 
 # === Konfigurasi tampilan Streamlit ===
 st.set_page_config(page_title="Gesture Voice Recognition 🤖", layout="centered")
@@ -51,7 +50,6 @@ GESTURES = {
     "🤘": kata4
 }
 
-
 # === Kelas VideoTransformer untuk mendeteksi gesture ===
 class HandGestureTransformer(VideoTransformerBase):
     def __init__(self):
@@ -71,7 +69,7 @@ class HandGestureTransformer(VideoTransformerBase):
             hand = hands[0]
             fingers = self.detector.fingersUp(hand)
 
-            # === Logika deteksi gesture ===
+            # === Logika deteksi gesture berdasarkan jari yang terangkat ===
             if fingers == [1, 1, 1, 1, 1]:
                 gesture_symbol = "✋"
             elif fingers == [1, 0, 0, 0, 0]:
@@ -81,24 +79,22 @@ class HandGestureTransformer(VideoTransformerBase):
             elif fingers[0] == 1 and fingers[1] == 1 and fingers[4] == 1 and fingers[2] == 0:
                 gesture_symbol = "🤘"
 
-            # === Ucapkan suara kalau gesture berubah ===
+            # === Ucapkan suara (text-to-speech) kalau gesture berubah dan sudah lebih 2 detik sejak terakhir ===
             current_time = time.time()
             if gesture_symbol and gesture_symbol != self.last_gesture and (current_time - self.last_time) > 2:
                 self.last_gesture = gesture_symbol
                 self.last_time = current_time
-                teks = GESTURES.get(gesture_symbol, "")
-                if teks:
-                    speak(teks)
+                text_to_speak = GESTURES.get(gesture_symbol, "")
+                if text_to_speak:
+                    speak(text_to_speak)
 
             cv2.putText(img, f"Gesture: {gesture_symbol}", (10, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         else:
-            # ✅ Diperbaiki indentasi di sini
             cv2.putText(img, "Tidak ada tangan terdeteksi", (10, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
         return img
-
 
 # === Streamlit WebRTC: akses kamera langsung dari browser ===
 webrtc_streamer(
