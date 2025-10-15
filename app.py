@@ -6,14 +6,16 @@ import os
 import time
 import threading
 from gtts import gTTS
+import mediapipe as mp
 
 # ---------- CONFIG ----------
-st.set_page_config(page_title="Gesture Voice Recognition", layout="centered")
-st.title("🪞 Gesture Voice Recognition - Mirror Camera Version")
+st.set_page_config(page_title="Gesture Voice Recognition (MediaPipe)", layout="centered")
+st.title("🖐️ Gesture Voice Recognition - MediaPipe Edition")
 st.markdown("""
-📸 Ambil foto gesture tanganmu dan biarkan AI mengenalinya!  
-🎙️ Kamera & hasil foto akan tampil **mirror (dibalik seperti cermin)**.  
-💡 Arah tangan kiri dan kanan akan sesuai dengan arah di layar.
+📸 Ambil foto gesture tanganmu.  
+🤖 Sistem akan mengenali bentuk jari menggunakan **MediaPipe Hands**.  
+🎙️ Suara otomatis sesuai gesture yang terdeteksi.  
+💡 Kamera & hasil foto akan tampil **mirror** seperti cermin.
 """)
 
 # ---------- INPUT TEKS ----------
@@ -45,58 +47,73 @@ def speak_async(text):
             st.error(f"Gagal memutar suara: {e}")
     threading.Thread(target=_run, daemon=True).start()
 
-# ---------- DETEKSI GESTURE ----------
-def detect_gesture(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (25, 25), 0)
-    _, thresh = cv2.threshold(blur, 70, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    gesture = ""
-    if contours:
-        contour = max(contours, key=cv2.contourArea)
-        hull = cv2.convexHull(contour)
-        area_contour = cv2.contourArea(contour)
-        area_hull = cv2.contourArea(hull)
-        area_ratio = ((area_hull - area_contour) / area_contour) * 100 if area_contour > 0 else 0
+# ---------- MEDIAPIPE SETUP ----------
+mp_hands = mp.solutions.hands
+mp_drawing = mp.solutions.drawing_utils
 
-        # Heuristik sederhana
-        if area_ratio < 10:
+def detect_gesture_mediapipe(image):
+    """Deteksi gesture dari foto menggunakan MediaPipe"""
+    with mp_hands.Hands(
+        static_image_mode=True,
+        max_num_hands=1,
+        min_detection_confidence=0.7
+    ) as hands:
+
+        # Konversi BGR ke RGB (karena MediaPipe pakai RGB)
+        results = hands.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        if not results.multi_hand_landmarks:
+            return "", image
+
+        hand_landmarks = results.multi_hand_landmarks[0]
+        mp_drawing.draw_landmarks(image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+
+        # Tentukan jari mana yang terbuka
+        finger_tips = [8, 12, 16, 20]  # Indeks ujung jari selain jempol
+        finger_states = []
+
+        landmarks = hand_landmarks.landmark
+        for tip_id in finger_tips:
+            finger_states.append(landmarks[tip_id].y < landmarks[tip_id - 2].y)
+        # Jempol (horizontal)
+        thumb_open = landmarks[4].x > landmarks[3].x
+
+        # Deteksi gesture
+        if all(finger_states) and thumb_open:
             gesture = "✋"
-        elif 10 <= area_ratio < 30:
+        elif thumb_open and not any(finger_states):
             gesture = "👍"
-        elif 30 <= area_ratio < 50:
+        elif finger_states[0] and finger_states[1] and not finger_states[2] and not finger_states[3]:
             gesture = "✌️"
-        else:
+        elif thumb_open and finger_states[0] and finger_states[3] and not finger_states[1] and not finger_states[2]:
             gesture = "🤘"
-    return gesture
+        else:
+            gesture = "Tidak dikenali"
+
+        return gesture, image
 
 # ---------- KAMERA ----------
 st.subheader("🎥 Ambil Foto Gesture")
-st.caption("Pastikan pencahayaan cukup dan tangan terlihat jelas.")
+st.caption("Pastikan tangan terlihat jelas dan pencahayaan cukup.")
 
-# Ambil foto dari kamera
-img_file = st.camera_input("📸 Ambil foto gesture (mirror mode aktif)")
+img_file = st.camera_input("📸 Ambil foto gesture tanganmu")
 
 if img_file is not None:
-    # Baca gambar dan buat mirror
+    # Baca & mirror gambar
     bytes_data = img_file.getvalue()
     np_img = np.frombuffer(bytes_data, np.uint8)
     img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-    mirror_img = cv2.flip(img, 1)  # 🔁 mirror hasil foto
+    mirror_img = cv2.flip(img, 1)
 
-    # Tampilkan hasil mirror
-    st.image(mirror_img, caption="📸 Foto Mirror (dibalik seperti cermin)", channels="BGR")
+    # Deteksi gesture menggunakan MediaPipe
+    gesture, annotated = detect_gesture_mediapipe(mirror_img)
 
-    # Deteksi gesture dari hasil mirror
-    gesture = detect_gesture(mirror_img)
-    text_to_speak = GESTURES.get(gesture, "")
+    # Tampilkan hasil
+    st.image(annotated, caption=f"Gesture terdeteksi: {gesture}", channels="BGR", use_column_width=True)
 
-    if gesture:
-        st.success(f"Gesture terdeteksi: {gesture}")
-        st.info(f"Teks: {text_to_speak}")
-        if text_to_speak:
-            speak_async(text_to_speak)
+    if gesture in GESTURES:
+        st.success(f"Gesture: {gesture} → \"{GESTURES[gesture]}\"")
+        speak_async(GESTURES[gesture])
     else:
-        st.warning("Gesture tidak dikenali. Coba foto ulang tanganmu dengan posisi lebih jelas.")
+        st.warning("Gesture tidak dikenali. Coba ambil ulang foto tanganmu.")
 else:
     st.info("Klik tombol di atas untuk mengambil foto gesture tanganmu.")
