@@ -1,63 +1,107 @@
 import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+import cv2
 from cvzone.HandTrackingModule import HandDetector
 from gtts import gTTS
 import tempfile
 import os
+import time
+import threading
 
-st.set_page_config(page_title="Gesture Image Recognition 🤖", layout="centered")
-st.title("🖐️ Gesture Recognition dari Gambar")
+# === Fungsi untuk bicara (text-to-speech) ===
+def speak(text):
+    def run_speech():
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+                tts = gTTS(text=text, lang='id')
+                tts.save(fp.name)
+                st.audio(fp.name, format="audio/mp3", autoplay=True)
+                time.sleep(2)
+                os.remove(fp.name)
+        except Exception as e:
+            st.error(f"Error suara: {e}")
+    threading.Thread(target=run_speech, daemon=True).start()
 
+
+# === UI Streamlit ===
+st.set_page_config(page_title="Gesture Voice Recognition 🤖", layout="centered")
+st.title("🖐️ Gesture Voice Recognition Langsung di Browser")
 st.markdown("""
-Unggah gambar tanganmu dan sistem akan mendeteksi simbol jari:
-- ✋ Semua jari terbuka  
-- 👍 Hanya jempol  
-- ✌️ Telunjuk & tengah  
-- 🤘 Metal (jempol, telunjuk, kelingking)
+Masukkan 4 kata yang akan diucapkan sesuai simbol jari berikut:
+1. ✋ = Semua jari terbuka  
+2. 👍 = Hanya jempol terbuka  
+3. ✌️ = Telunjuk & tengah terbuka  
+4. 🤘 = Metal (jempol, telunjuk, dan kelingking terbuka)
 """)
 
-uploaded = st.file_uploader("Unggah gambar tangan (jpg/png)", type=["jpg", "png", "jpeg"])
+col1, col2 = st.columns(2)
+with col1:
+    kata1 = st.text_input("✋ (Semua jari terbuka)", "Halo semuanya!")
+    kata2 = st.text_input("👍 (Hanya jempol)", "Saya senang hari ini!")
+with col2:
+    kata3 = st.text_input("✌️ (Telunjuk & Tengah)", "Nama saya Enrico!")
+    kata4 = st.text_input("🤘 (Metal)", "Sampai jumpa lagi!")
 
-if uploaded:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-        tmp.write(uploaded.read())
-        img_path = tmp.name
+# === Mapping gesture ke teks ===
+gestures_dict = {
+    "✋": kata1,
+    "👍": kata2,
+    "✌️": kata3,
+    "🤘": kata4
+}
 
-    # Deteksi gesture
-    from cv2 import cv2
-    import numpy as np
-    img = cv2.imread(img_path)
-    detector = HandDetector(detectionCon=0.8, maxHands=1)
-    hands, img = detector.findHands(img)
 
-    if hands:
-        hand = hands[0]
-        fingers = detector.fingersUp(hand)
+# === Kelas VideoTransformer untuk Streamlit WebRTC ===
+class HandGestureTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.detector = HandDetector(detectionCon=0.8, maxHands=1)
+        self.last_gesture = ""
+        self.last_time = time.time()
+
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        img = cv2.flip(img, 1)
+
+        hands, img = self.detector.findHands(img)
         gesture_symbol = ""
 
-        if fingers == [1,1,1,1,1]:
-            gesture_symbol = "✋"
-            text = "Halo semuanya!"
-        elif fingers == [1,0,0,0,0]:
-            gesture_symbol = "👍"
-            text = "Saya senang hari ini!"
-        elif fingers == [0,1,1,0,0]:
-            gesture_symbol = "✌️"
-            text = "Nama saya Enrico!"
-        elif fingers[0]==1 and fingers[1]==1 and fingers[4]==1 and fingers[2]==0:
-            gesture_symbol = "🤘"
-            text = "Sampai jumpa lagi!"
+        if hands:
+            hand = hands[0]
+            fingers = self.detector.fingersUp(hand)
+
+            # === Deteksi gesture ===
+            if fingers == [1, 1, 1, 1, 1]:
+                gesture_symbol = "✋"
+            elif fingers == [1, 0, 0, 0, 0]:
+                gesture_symbol = "👍"
+            elif fingers == [0, 1, 1, 0, 0]:
+                gesture_symbol = "✌️"
+            elif fingers[0] == 1 and fingers[1] == 1 and fingers[4] == 1 and fingers[2] == 0:
+                gesture_symbol = "🤘"
+
+            # === Jika gesture berubah, ucapkan teks ===
+            current_time = time.time()
+            if gesture_symbol and gesture_symbol != self.last_gesture and (current_time - self.last_time) > 2:
+                self.last_gesture = gesture_symbol
+                self.last_time = current_time
+                teks = gestures_dict.get(gesture_symbol, "")
+                if teks:
+                    speak(teks)
+
+            cv2.putText(img, f"Gesture: {gesture_symbol}", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         else:
-            text = "Tidak dikenali"
+            cv2.putText(img, "Tidak ada tangan terdeteksi", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-        st.image(img, caption=f"Gesture terdeteksi: {gesture_symbol}")
-        st.success(f"Teks: {text}")
+        return img
 
-        # Putar suara
-        tts = gTTS(text=text, lang='id')
-        sound_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
-        tts.save(sound_path)
-        st.audio(sound_path, format='audio/mp3', autoplay=True)
 
-        os.remove(img_path)
-    else:
-        st.warning("Tidak ada tangan terdeteksi dalam gambar.")
+# === Streamlit WebRTC: akses kamera dari browser ===
+webrtc_streamer(
+    key="gesture-voice",
+    video_processor_factory=HandGestureTransformer,
+    media_stream_constraints={"video": True, "audio": False},
+)
+
+st.success("✅ Akseskan izin kamera di browser untuk memulai gesture recognition.")
