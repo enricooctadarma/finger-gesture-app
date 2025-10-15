@@ -44,13 +44,13 @@ GESTURES = {
 }
 
 
-# ---------- TTS helper (no threading; safe for Streamlit) ----------
-def generate_tts_file(text: str) -> str:
-"""Generate tts mp3 and return file path (caller must remove file after use)."""
-with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-tts = gTTS(text=text, lang='id')
-tts.save(fp.name)
-return fp.name
+# ---------- TTS helper ----------
+def generate_tts_file(text):
+    """Generate tts mp3 and return file path (caller must remove file after use)."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+        tts = gTTS(text=text, lang="id")
+        tts.save(fp.name)
+        return fp.name
 
 
 # ---------- Video transformer ----------
@@ -63,4 +63,5 @@ self.last_time = time.time()
 
 
 st.success('✅ Izinkan akses kamera di browser untuk memulai gesture recognition.')
+
 
