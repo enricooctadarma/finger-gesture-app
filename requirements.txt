@@ -1,5 +1,6 @@
 streamlit
-opencv-python
+opencv-python-headless
 cvzone
+mediapipe
 gtts
-playsound==1.2.2
+numpy
