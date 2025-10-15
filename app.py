@@ -9,13 +9,13 @@ import time
 
 # ---------- Konfigurasi Halaman ----------
 st.set_page_config(page_title="Gesture Voice Recognition 🤖", layout="centered")
-st.title("🖐️ Gesture Voice Recognition Tanpa Mediapipe")
+st.title("🖐️ Gesture Voice Recognition Tanpa Mediapipe (Stable Cloud Version)")
 st.markdown("""
 Masukkan 4 kalimat yang akan diucapkan sesuai simbol jari berikut:
 1. ✋ = Semua jari terbuka  
 2. 👍 = Hanya jempol terbuka  
 3. ✌️ = Telunjuk & tengah terbuka  
-4. 🤘 = Metal (jempol, telunjuk, kelingking)
+4. 🤘 = Metal (jempol, telunjuk, dan kelingking terbuka)
 """)
 
 # ---------- Input Kalimat ----------
@@ -43,9 +43,12 @@ def generate_tts_file(text):
         return fp.name
 
 
-# ---------- Deteksi Gesture Manual ----------
+# ---------- Fungsi Deteksi Gesture Manual ----------
 def detect_gesture(img):
-    """Deteksi sederhana gesture tangan berdasarkan area kulit dan jumlah jari."""
+    """
+    Deteksi sederhana gesture tangan berbasis area kulit.
+    Bukan machine learning, hanya contour & threshold sederhana agar ringan di Cloud.
+    """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (35, 35), 0)
     _, thresh = cv2.threshold(blur, 70, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -60,6 +63,7 @@ def detect_gesture(img):
         area_hull = cv2.contourArea(hull)
         area_ratio = ((area_hull - area_contour) / area_contour) * 100 if area_contour > 0 else 0
 
+        # Heuristik sederhana
         if area_ratio < 5:
             gesture = "✋"
         elif area_ratio < 15:
@@ -84,6 +88,7 @@ class HandGestureTransformer(VideoTransformerBase):
 
         gesture, mask = detect_gesture(img)
 
+        # Delay 2 detik antar gesture untuk mencegah spam suara
         current_time = time.time()
         if gesture and gesture != self.last_gesture and (current_time - self.last_time) > 2:
             self.last_gesture = gesture
@@ -115,6 +120,16 @@ if st.session_state["webrtc_running"]:
         video_processor_factory=HandGestureTransformer,
         media_stream_constraints={"video": True, "audio": False},
         async_processing=True,
+        rtc_configuration={  # FIX WebRTC Error di Streamlit Cloud
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]},
+                {
+                    "urls": ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"],
+                    "username": "openrelayproject",
+                    "credential": "openrelayproject",
+                },
+            ]
+        },
     )
 else:
     st.info("Kamera berhenti. Klik 'Start Kamera' untuk memulai.")
