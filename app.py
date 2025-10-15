@@ -8,10 +8,10 @@ import time
 
 # ---------- Konfigurasi Halaman ----------
 st.set_page_config(page_title="Gesture Voice Recognition 🤖", layout="centered")
-st.title("🖐️ Gesture Voice Recognition (Cloud Version - Mirror Camera)")
+st.title("🖐️ Gesture Voice Recognition (Auto Camera Refresh - Mirror Mode)")
 st.markdown("""
-Aplikasi ini menggunakan kamera Streamlit (tanpa WebRTC).  
-Klik **Ambil Foto** untuk mendeteksi gesture — kamera akan tampil mirror.
+Versi ini **otomatis memperbarui kamera setiap 2 detik** (tanpa WebRTC).  
+Kamera sudah **dibalik (mirror)** agar sesuai dengan arah tangan kamu 👋  
 """)
 
 # ---------- Input Kalimat ----------
@@ -70,17 +70,23 @@ def detect_gesture(img):
 
     return gesture
 
-# ---------- Ambil Gambar dari Kamera ----------
-st.write("📸 Ambil gambar dari kamera:")
-img_file = st.camera_input("Klik tombol di bawah untuk ambil foto (kamera mirror)")
+# ---------- Session State ----------
+if "last_gesture" not in st.session_state:
+    st.session_state.last_gesture = ""
+if "last_time" not in st.session_state:
+    st.session_state.last_time = 0
+
+# ---------- Kamera ----------
+st.write("📸 Kamera akan memperbarui otomatis setiap 2 detik:")
+img_file = st.camera_input("Klik untuk mulai kamera")
 
 if img_file is not None:
-    # Konversi ke format OpenCV
+    # Convert gambar ke OpenCV format
     bytes_data = img_file.getvalue()
     np_img = np.frombuffer(bytes_data, np.uint8)
     img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
 
-    # 🔁 Balik kamera (mirror)
+    # 🔁 Mirror kamera
     img = cv2.flip(img, 1)
 
     # Deteksi gesture
@@ -89,10 +95,25 @@ if img_file is not None:
     # Tampilkan hasil
     st.image(img, caption=f"Gesture terdeteksi: {gesture or 'Tidak dikenali'}", channels="BGR")
 
-    if gesture:
+    # Batasi jeda antar suara biar gak spam
+    current_time = time.time()
+    if gesture and gesture != st.session_state.last_gesture and (current_time - st.session_state.last_time) > 2:
+        st.session_state.last_gesture = gesture
+        st.session_state.last_time = current_time
         text = GESTURES.get(gesture, "")
         if text:
             st.success(f"Gesture {gesture} → \"{text}\"")
             speak(text)
-    else:
-        st.warning("Tidak dapat mendeteksi gesture dengan jelas, coba ulangi dengan posisi tangan yang lebih terlihat.")
+    elif not gesture:
+        st.warning("Tidak dapat mendeteksi gesture dengan jelas. Coba ulangi.")
+else:
+    st.info("Izinkan kamera terlebih dahulu untuk memulai gesture recognition.")
+
+# ---------- Auto Refresh ----------
+# Memperbarui halaman otomatis tiap 2 detik selama kamera aktif
+st.markdown(
+    """
+    <meta http-equiv="refresh" content="2">
+    """,
+    unsafe_allow_html=True
+)
