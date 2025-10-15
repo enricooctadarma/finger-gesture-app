@@ -2,5 +2,3 @@ streamlit>=1.29.0,<2.0
 opencv-python-headless==4.10.0.84
 gtts==2.5.4
 numpy==1.26.4
-
-
